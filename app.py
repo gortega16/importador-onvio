@@ -8,6 +8,13 @@ import pandas as pd
 import pdfplumber
 import streamlit as st
 
+try:
+    import pytesseract
+    from pdf2image import convert_from_bytes
+except Exception:
+    pytesseract = None
+    convert_from_bytes = None
+
 st.set_page_config(page_title="Importador ONVIO", page_icon="📥", layout="wide")
 
 # ==========================
@@ -105,11 +112,34 @@ def norm_doc(value) -> str:
 
 
 def parse_pdf(uploaded_file) -> ParsedPDF:
+    file_bytes = uploaded_file.getvalue()
     text_parts = []
-    with pdfplumber.open(uploaded_file) as pdf:
+    page_count = 0
+    with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+        page_count = len(pdf.pages)
         for page in pdf.pages:
             text_parts.append(page.extract_text() or "")
-    return ParsedPDF(text="\n".join(text_parts), pages=len(text_parts))
+
+    joined = "\n".join(text_parts).strip()
+    has_useful_text = len(re.sub(r"\s+", "", joined)) > 80
+
+    if has_useful_text:
+        return ParsedPDF(text=joined, pages=page_count)
+
+    if pytesseract is not None and convert_from_bytes is not None:
+        ocr_parts = []
+        try:
+            images = convert_from_bytes(file_bytes, dpi=250)
+            for img in images:
+                txt = pytesseract.image_to_string(img, lang="spa+eng")
+                ocr_parts.append(txt or "")
+            joined_ocr = "\n".join(ocr_parts).strip()
+            if joined_ocr:
+                return ParsedPDF(text=joined_ocr, pages=len(images))
+        except Exception:
+            pass
+
+    return ParsedPDF(text=joined, pages=page_count)
 
 
 def detect_type(filename: str, df: Optional[pd.DataFrame] = None, pdf_text: str = "") -> str:
