@@ -150,29 +150,52 @@ def map_letra(row: pd.Series) -> str:
     return m.group(1) if m else ""
 
 
+def get_series(df: pd.DataFrame, col: str, default="") -> pd.Series:
+    if col in df.columns:
+        value = df[col]
+        if isinstance(value, pd.DataFrame):
+            value = value.iloc[:, 0]
+        return value.reset_index(drop=True)
+    return pd.Series([default] * len(df), index=df.index)
+
+
 def to_pre002(df: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame(columns=PRE002_COLUMNS)
     work = df.copy()
     work.columns = [str(c).strip().upper() for c in work.columns]
 
-    pv_num = work.get("NUMERO", pd.Series(dtype=str)).apply(split_numero)
-    out["Fecha de Emisión"] = pd.to_datetime(work.get("FECHA"), errors="coerce").dt.strftime("%d/%m/%Y")
-    out["Código de Cliente"] = work.get("ID_DESTINO", "")
-    out["Razón social del Cliente"] = work.get("CLIENTE", "")
+    fecha = get_series(work, "FECHA")
+    numero = get_series(work, "NUMERO")
+    id_destino = get_series(work, "ID_DESTINO")
+    cliente = get_series(work, "CLIENTE")
+    cuit = get_series(work, "CUIT")
+    categoria = get_series(work, "CATEGORIA_")
+    importe_neto = get_series(work, "IMPORTE_NE", 0)
+    imp_intern = get_series(work, "IMP_INTERN", 0)
+    no_grabado = get_series(work, "NO_GRABADO", 0)
+    importe_iva = get_series(work, "IMPORTE_IV", 0)
+    neto_no_gr = get_series(work, "NETO_NO_GR", 0)
+    importe_total = get_series(work, "IMPORTE_TO", 0)
+
+    pv_num = numero.apply(split_numero)
+    fecha_fmt = pd.to_datetime(fecha, errors="coerce")
+    out["Fecha de Emisión"] = fecha_fmt.dt.strftime("%d/%m/%Y").fillna("")
+    out["Código de Cliente"] = id_destino.astype(str).replace("nan", "")
+    out["Razón social del Cliente"] = cliente.astype(str).replace("nan", "")
     out["Tipo de Comprobante"] = work.apply(map_tipo_comprobante, axis=1)
     out["Letra"] = work.apply(map_letra, axis=1)
     out["Punto de Venta"] = pv_num.apply(lambda x: x[0])
     out["Número"] = pv_num.apply(lambda x: x[1])
-    out["Número de Documento del Cliente"] = work.get("CUIT", "").apply(norm_doc)
-    out["Situación de IVA del Cliente"] = work.get("CATEGORIA_", "").astype(str).str.upper().map(IVA_MAP).fillna(work.get("CATEGORIA_", ""))
-    out["Importe Neto"] = pd.to_numeric(work.get("IMPORTE_NE", 0), errors="coerce").fillna(0).round(2)
-    internos = pd.to_numeric(work.get("IMP_INTERN", 0), errors="coerce").fillna(0)
-    no_grav = pd.to_numeric(work.get("NO_GRABADO", 0), errors="coerce").fillna(0)
+    out["Número de Documento del Cliente"] = cuit.apply(norm_doc)
+    out["Situación de IVA del Cliente"] = categoria.astype(str).str.upper().map(IVA_MAP).fillna(categoria)
+    out["Importe Neto"] = pd.to_numeric(importe_neto, errors="coerce").fillna(0).round(2)
+    internos = pd.to_numeric(imp_intern, errors="coerce").fillna(0)
+    no_grav = pd.to_numeric(no_grabado, errors="coerce").fillna(0)
     out["Impuestos Internos / No Gravado"] = (internos + no_grav).round(2)
-    out["IVA Inscripto"] = pd.to_numeric(work.get("IMPORTE_IV", 0), errors="coerce").fillna(0).round(2)
+    out["IVA Inscripto"] = pd.to_numeric(importe_iva, errors="coerce").fillna(0).round(2)
     out["IVA No Inscripto"] = 0.0
-    out["IVA Exento"] = pd.to_numeric(work.get("NETO_NO_GR", 0), errors="coerce").fillna(0).round(2)
-    out["Importe Total del Comprobante"] = pd.to_numeric(work.get("IMPORTE_TO", 0), errors="coerce").fillna(0).round(2)
+    out["IVA Exento"] = pd.to_numeric(neto_no_gr, errors="coerce").fillna(0).round(2)
+    out["Importe Total del Comprobante"] = pd.to_numeric(importe_total, errors="coerce").fillna(0).round(2)
     return out
 
 
